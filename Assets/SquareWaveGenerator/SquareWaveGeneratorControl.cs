@@ -37,8 +37,8 @@ namespace SqrWaveGenerator
 
             if (!m_AudioSource.isPlaying
                 || !ControlContext.builtIn.Exists(handle)
-                || Mathf.Approximately(frequency, m_PreviousFrequency)
-                || (m_prevRatio == dutyRatio && dutyRatio == DutyRatio.UNDEFINED)
+                || (Mathf.Approximately(frequency, m_PreviousFrequency) && dutyRatio == m_prevRatio)
+                || dutyRatio == DutyRatio.UNDEFINED
                 )
                 return;
 

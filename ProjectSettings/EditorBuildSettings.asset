@@ -9,5 +9,5 @@ EditorBuildSettings:
     path: Assets/SineGeneraor.unity
     guid: 8c9cfa26abfee488c85f1582747f6a02
   m_configObjects:
-    com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 2a9f65c639a8246cda66973380650f4d, type: 3}
+    com.unity.input.settings.actions: {fileID: -944628639613478452, guid: cf43e702cfa0f4415b376f8f1c82945d, type: 3}
   m_UseUCBPForAssetBundles: 0

@@ -26,7 +26,17 @@ public class TriangleWaveGenerator : ScriptableObject, IGeneratorDefinition
 
         float m_Frequency;
         float m_Phase;
-
+        bool isEnabled;
+        // de-click用
+        float m_env;                        // 0..1 出力ゲイン（エンベロープ）
+        private float m_target;             // 0 or 1
+        private int m_attackSamples;        // アタック長
+        private int m_releaseSamples;       // リリース長
+        private bool m_zeroCrossStop;       // trueでNoteOffはゼロクロス優先
+        private float m_lastSample;         // 直前サンプル（ゼロクロス判定用）
+        // スイッチ
+        private bool m_useBandLimitedTriangle;
+        
         public static Generator Allocate(ControlContext context, float frequency)
         {
             return context.AllocateGenerator(new Processor(frequency), new Control());
@@ -38,11 +48,19 @@ public class TriangleWaveGenerator : ScriptableObject, IGeneratorDefinition
 
         Generator.Setup m_Setup;
 
-        Processor(float frequency)
+        Processor(float frequency,float attackMs = 1.0f, float releaseMs = 3.0f, bool zeroCrossStop = false)
         {
             m_Frequency = frequency;
             m_Phase = 0.0f;
             m_Setup = new Generator.Setup();
+            isEnabled = false;
+            m_attackSamples  = Mathf.Max(1, Mathf.RoundToInt(attackMs  * 0.001f * m_Setup.sampleRate));
+            m_releaseSamples = Mathf.Max(1, Mathf.RoundToInt(releaseMs * 0.001f * m_Setup.sampleRate));
+            m_zeroCrossStop  = zeroCrossStop;
+            m_env = 0f;
+            m_target = 0f;
+            m_lastSample = 0f;
+            m_useBandLimitedTriangle = false;
         }
 
         public void Update(UnityEngine.Audio.Processor.UpdatedDataContext context, UnityEngine.Audio.Processor.Pipe pipe)
@@ -51,35 +69,84 @@ public class TriangleWaveGenerator : ScriptableObject, IGeneratorDefinition
 
 			foreach (var element in enumerator)
 			{
-	            if (element.TryGetData(out FrequencyData data))
-    	            m_Frequency = data.Value;
-        	    else
+                if (element.TryGetData(out FrequencyData data))
+                {
+                    m_Frequency = data.Value;
+                    isEnabled = data.IsActive;
+                }
+                else
             	    Debug.Log("DataAvailable: unknown data."); 
 			}
         }
 
-        public Generator.Result Process(in ProcessingContext ctx, UnityEngine.Audio.Processor.Pipe pipe, ChannelBuffer buffer, Generator.Arguments args)
+        
+
+        // PolyBLEP（標準形）
+        static float PolyBLEP(float t, float dt)
         {
-            for (var frame = 0; frame < buffer.frameCount; frame++)
+            if (t < dt)
             {
-                // 位相を [0,1) に正規化
-                float phase = m_Phase - Mathf.Floor(m_Phase);
+                float x = t / dt;
+                return x + x - x * x - 1f;
+            }
+            if (t > 1f - dt)
+            {
+                float x = (t - 1f) / dt;
+                return x * x + x + x + 1f;
+            }
+            return 0f;
+        }
 
-                // 三角波を -1～+1 で生成
-                float tri = 4f * Mathf.Abs(phase - 0.5f) - 1f;
+        public Generator.Result Process(in ProcessingContext ctx,
+            UnityEngine.Audio.Processor.Pipe pipe, ChannelBuffer buffer, Generator.Arguments args)
+        {
+            int frames = buffer.frameCount;
+            int channels = buffer.channelCount;
+            float sr = m_Setup.sampleRate;
 
-                // 各チャンネルに書き込み
-                for (var channel = 0; channel < buffer.channelCount; channel++)
+            m_target = isEnabled ? 1f : 0f;
+
+            for (int frame = 0; frame < frames; frame++)
+            {
+                // ---- 1) エンベロープ ----
+                if (m_target > m_env)      m_env = Mathf.Min(1f, m_env + 1f / m_attackSamples);
+                else if (m_target < m_env) m_env = Mathf.Max(0f, m_env - 1f / m_releaseSamples);
+
+                // ---- 2) 波形 ----
+                float tri;
+
+                if (!m_useBandLimitedTriangle)
                 {
-                    buffer[channel, frame] = tri;
+                    // naive triangle
+                    float phase = m_Phase - Mathf.Floor(m_Phase);
+                    tri = 4f * Mathf.Abs(phase - 0.5f) - 1f;
+                }
+                else
+                {
+                    // PolyBLEP saw -> triangle 変換
+                    float t  = m_Phase - Mathf.Floor(m_Phase);   // [0,1)
+                    float dt = Mathf.Min(0.5f, m_Frequency / sr);
+
+                    // band-limited sawtooth (-1..+1)
+                    float saw = 2f * t - 1f;
+                    saw -= PolyBLEP(t, dt);
+
+                    // saw -> triangle（対称化）
+                    // tri ≈ 1 - 2*|saw| で -1..+1 の三角に写像（穏やかな角になり高域がマイルド）
+                    tri = 1f - 2f * Mathf.Abs(saw);
                 }
 
-                // 次のサンプルへ時間を進める
-                m_Phase += m_Frequency / m_Setup.sampleRate;
-                if (m_Phase > 1.0f) m_Phase = 0.0f;
-            }
+                // ---- 3) エンベロープ適用 ----
+                float vOut = tri * m_env;
 
-            return buffer.frameCount;
+                for (int ch = 0; ch < channels; ch++)
+                    buffer[ch, frame] = vOut;
+
+                // ---- 4) 位相進行 ----
+                m_Phase += m_Frequency / sr;
+                if (m_Phase >= 1f) m_Phase -= 1f;
+            }
+            return frames;
         }
 
         struct Control : Generator.IControl<Processor>
@@ -103,10 +170,12 @@ public class TriangleWaveGenerator : ScriptableObject, IGeneratorDefinition
         internal struct FrequencyData
         {
             public readonly float Value;
+            public readonly bool IsActive;
 
-            public FrequencyData(float value)
+            public FrequencyData(float value, bool isActive)
             {
                 Value = value;
+                IsActive = isActive;
             }
         }
     }

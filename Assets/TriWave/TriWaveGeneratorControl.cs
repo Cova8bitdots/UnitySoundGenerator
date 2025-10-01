@@ -1,18 +1,17 @@
+using R3;
+using UnityEngine;
+using UnityEngine.Audio;
+
 namespace TriWave
 {
-    using System;
-    using UnityEngine;
-    using UnityEngine.Audio;
 
     [RequireComponent(typeof(AudioSource))]
-    public class TriWaveGeneratorControl : MonoBehaviour
+    public class TriWaveGeneratorControl : MonoBehaviour, ISynthsizer
     {
         [SerializeField] AudioSource m_AudioSource;
-        [Range(100f, 5000f)]
-        public float frequency = 432;
 
-        float m_PreviousFrequency;
-
+        ReactiveProperty<float> Frequency = new(432);
+        ReactiveProperty<bool> IsActive = new(false);
         void Reset()
         {
             TryGetComponent(out m_AudioSource);
@@ -21,19 +20,27 @@ namespace TriWave
         private void Awake()
         {
             m_AudioSource ??= GetComponent<AudioSource>();
+            Observable.Merge(Frequency.Skip(1).Select(_ => 0),
+                IsActive.Skip(1).Select(_ => 0))
+                .Where(_ => m_AudioSource.isPlaying)
+                .Where(_ => ControlContext.builtIn.Exists(m_AudioSource.generatorHandle))
+                .Subscribe(_ =>
+                    {
+                        var handle = m_AudioSource.generatorHandle;
+                        ControlContext.builtIn.SendData(handle,
+                            new TriangleWaveGenerator.Processor.FrequencyData(Frequency.CurrentValue, IsActive.CurrentValue));
+                    }
+                ).AddTo(this);
+        }
+        
+        public void SetFrequency(float frequency)
+        {
+            Frequency.Value =  Mathf.Clamp(frequency, 20f, 22050f);
         }
 
-        void Update()
+        public void SetActive(bool active)
         {
-            var handle = m_AudioSource.generatorHandle;
-
-            if (!m_AudioSource.isPlaying
-                || !ControlContext.builtIn.Exists(handle)
-                || Mathf.Approximately(frequency, m_PreviousFrequency))
-                return;
-
-            ControlContext.builtIn.SendData(handle, new TriangleWaveGenerator.Processor.FrequencyData(frequency));
-            m_PreviousFrequency = frequency;
+            IsActive.Value = active;
         }
     }
 

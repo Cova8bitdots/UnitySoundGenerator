@@ -1,4 +1,5 @@
 using System;
+using R3;
 using UnityEngine;
 using UnityEngine.Audio;
 
@@ -12,14 +13,14 @@ namespace SqrWaveGenerator
         Half = 2,
     }
     [RequireComponent(typeof(AudioSource))]
-    public class SquareWaveGeneratorControl : MonoBehaviour
+    public class SquareWaveGeneratorControl : MonoBehaviour, ISynthsizer
     {
         [SerializeField] AudioSource m_AudioSource;
-        [Range(100f, 5000f)] public float frequency = 432;
         public DutyRatio dutyRatio = DutyRatio.Eightth;
 
-        float m_PreviousFrequency;
-        DutyRatio m_prevRatio = DutyRatio.UNDEFINED;
+        ReactiveProperty<float> Frequency = new(432);
+        ReactiveProperty<DutyRatio> Ratio = new(DutyRatio.Eightth);
+        ReactiveProperty<bool> IsActive = new(false);
 
         void Reset()
         {
@@ -29,22 +30,37 @@ namespace SqrWaveGenerator
         private void Awake()
         {
             m_AudioSource ??= GetComponent<AudioSource>();
+            
+            Observable.Merge(
+                    Frequency.Skip(1).Select(_ => 0),
+                    Ratio.Skip(1).Select(_ => 0),
+                    IsActive.Skip(1).Select(_ => 0))
+                .Where(_ => m_AudioSource.isPlaying)
+                .Where(_ => ControlContext.builtIn.Exists(m_AudioSource.generatorHandle))
+                .Subscribe(_ =>
+                    {
+                        var handle = m_AudioSource.generatorHandle;
+                        ControlContext.builtIn.SendData(handle,
+                            new SquareWaveGenerator.Processor.WaveData(Frequency.CurrentValue,
+                                1f/(float)Ratio.CurrentValue,
+                                IsActive.CurrentValue));
+                    }
+                ).AddTo(this);
+        }
+        
+
+        public void SetFrequency(float frequency)
+        {
+            Frequency.Value =  Mathf.Clamp(frequency, 20f, 22050f);
         }
 
-        void Update()
+        public void SetActive(bool active)
         {
-            var handle = m_AudioSource.generatorHandle;
-
-            if (!m_AudioSource.isPlaying
-                || !ControlContext.builtIn.Exists(handle)
-                || (Mathf.Approximately(frequency, m_PreviousFrequency) && dutyRatio == m_prevRatio)
-                || dutyRatio == DutyRatio.UNDEFINED
-                )
-                return;
-
-            ControlContext.builtIn.SendData(handle, new SquareWaveGenerator.Processor.WaveData(frequency, 1f/(float)dutyRatio));
-            m_PreviousFrequency = frequency;
-            m_prevRatio = dutyRatio;
+            IsActive.Value = active;
+        }
+        public void SetRatio(DutyRatio ratio)
+        {
+            Ratio.Value = ratio;
         }
     }
 

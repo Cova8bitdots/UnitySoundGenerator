@@ -131,7 +131,7 @@ GameObject:
   - component: {fileID: 326930048}
   - component: {fileID: 326930050}
   m_Layer: 0
-  m_Name: Audio Source (2)
+  m_Name: SquareWave
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -511,12 +511,12 @@ GameObject:
   - component: {fileID: 2026472013}
   - component: {fileID: 2026472012}
   m_Layer: 0
-  m_Name: Audio Source (1)
+  m_Name: Triangle
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &2026472012
 MonoBehaviour:
   m_ObjectHideFlags: 0
